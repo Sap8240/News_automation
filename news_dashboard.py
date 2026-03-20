@@ -194,7 +194,10 @@ with st.sidebar.expander("🔍 Filters & Search", expanded=True):
     # Real auto-refresh component
     st_autorefresh(interval=refresh_interval * 1000, key="newsfeedrefresh")
     
-    keyword_filter = st.sidebar.text_input("🔎 Search Keywords", "")
+    global_search = st.sidebar.text_input("🔎 Search Keywords", "")
+    if global_search:
+        if st.sidebar.button("❌ Clear Search", use_container_width=True):
+            st.rerun()
     
     st.sidebar.subheader("News Categories")
     show_priority = st.sidebar.checkbox("🔴 Show Priority News", value=True)
@@ -304,7 +307,9 @@ def fetch_news():
                 
                 all_news.append(news_item)
         except Exception as e:
-            st.sidebar.warning(f"Error fetching from {source}: {str(e)[:50]}")
+            # Store errors to show later instead of immediate warnings
+            if 'errors' not in st.session_state: st.session_state.errors = []
+            st.session_state.errors.append(f"{source}: {str(e)[:50]}")
             continue
     
     return {
@@ -359,11 +364,31 @@ def display_news_card(story):
 st.markdown('<h1 class="main-header">📰 TheIndianVisual News Dashboard</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">🔴 Live Indian News Monitoring | Auto-refreshes Every 2 Minutes</p>', unsafe_allow_html=True)
 
-# Fetch news data
-data_bundle = fetch_news()
-news_data = data_bundle['news']
+# Clear previous errors
+if 'errors' in st.session_state: del st.session_state.errors
+
+# Fetch news data with UX feedback
+with st.status("📡 Fetching latest news stories...", expanded=False) as status:
+    data_bundle = fetch_news()
+    status.update(label="✅ News updated!", state="complete", expanded=False)
+    st.toast("Updated news from all sources!")
+
+news_all = data_bundle['news']
 last_fetch_time = data_bundle['time']
+
+# Global Filtering
+if global_search:
+    news_data = [n for n in news_all if global_search.lower() in (n['title'] + n['summary']).lower()]
+else:
+    news_data = news_all
+
 st.session_state.news = news_data
+
+# Display fetch errors if any
+if 'errors' in st.session_state and st.session_state.errors:
+    with st.sidebar.expander("⚠️ Feed Alerts"):
+        for err in st.session_state.errors:
+            st.error(err)
 
 # Update sidebar last update time
 last_update_placeholder.markdown(f"---")
@@ -442,12 +467,7 @@ with tab3:
     st.subheader("📚 All News Stories")
     st.markdown("*Complete view of all collected stories across all categories and sources*")
     
-    # Search and filter in all news
-    search_term = st.text_input("🔍 Search news", "")
-    
     displayed_news = news_data
-    if search_term:
-        displayed_news = [n for n in news_data if search_term.lower() in (n['title'] + n['summary']).lower()]
     
     if displayed_news:
         for story in displayed_news[:30]:
