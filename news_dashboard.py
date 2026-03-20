@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import plotly.express as px
+from streamlit_autorefresh import st_autorefresh
 
 # Your existing RSS feeds & keywords (same as bot)
 RSS_FEEDS = {
@@ -190,6 +191,9 @@ with st.sidebar.expander("🔍 Filters & Search", expanded=True):
     st.sidebar.subheader("Refresh Settings")
     refresh_interval = st.sidebar.slider("Auto-refresh (seconds)", 30, 600, 120)
     
+    # Real auto-refresh component
+    st_autorefresh(interval=refresh_interval * 1000, key="newsfeedrefresh")
+    
     keyword_filter = st.sidebar.text_input("🔎 Search Keywords", "")
     
     st.sidebar.subheader("News Categories")
@@ -221,9 +225,8 @@ st.sidebar.metric("Total Feed Sources", len(RSS_FEEDS))
 st.sidebar.metric("Priority Keywords", len(PRIORITY_KEYWORDS))
 st.sidebar.metric("Trending Keywords", len(TRENDING_KEYWORDS))
 
-# Last update time
-st.sidebar.markdown("---")
-st.sidebar.caption(f"⏰ Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+# Last update time placeholder will be filled later
+last_update_placeholder = st.sidebar.empty()
 
 def extract_image_from_entry(entry):
     """Extract image URL from RSS entry"""
@@ -260,10 +263,18 @@ def extract_image_from_entry(entry):
 @st.cache_data(ttl=60)  # Cache for 1 minute
 def fetch_news():
     all_news = []
+    fetch_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
     
     for source, url in RSS_FEEDS.items():
         try:
-            feed = feedparser.parse(url)
+            # Using requests to bypass potential feedparser/WAF issues
+            response = requests.get(url, headers=headers, timeout=10)
+            feed = feedparser.parse(response.content)
+            
             for entry in feed.entries[:10]:
                 # Extract full summary (better than truncated version)
                 summary = getattr(entry, 'summary', '')
@@ -296,7 +307,10 @@ def fetch_news():
             st.sidebar.warning(f"Error fetching from {source}: {str(e)[:50]}")
             continue
     
-    return sorted(all_news, key=lambda x: x['priority'], reverse=True)
+    return {
+        'news': sorted(all_news, key=lambda x: x['priority'], reverse=True),
+        'time': fetch_time
+    }
 
 def display_news_card(story):
     """Display a formatted news card with image and details"""
@@ -346,8 +360,14 @@ st.markdown('<h1 class="main-header">📰 TheIndianVisual News Dashboard</h1>', 
 st.markdown('<p class="subtitle">🔴 Live Indian News Monitoring | Auto-refreshes Every 2 Minutes</p>', unsafe_allow_html=True)
 
 # Fetch news data
-news_data = fetch_news()
+data_bundle = fetch_news()
+news_data = data_bundle['news']
+last_fetch_time = data_bundle['time']
 st.session_state.news = news_data
+
+# Update sidebar last update time
+last_update_placeholder.markdown(f"---")
+last_update_placeholder.caption(f"⏰ Last updated: {last_fetch_time}")
 
 # Metrics row with enhanced styling
 st.markdown('<div class="stats-section">', unsafe_allow_html=True)
@@ -485,7 +505,7 @@ st.markdown("""
 <div style="text-align: center; color: #666; font-size: 0.9rem; padding: 1.5rem 0;">
     <p><strong>TheIndianVisual News Dashboard</strong> | Built with ❤️ using Streamlit</p>
     <p>📰 Aggregating news from 15+ Indian news sources | 🔄 Auto-refreshing data</p>
-    <p style="font-size: 0.85rem;">Last updated: {}</p>
+    <p style="font-size: 0.85rem;">Last fetched: {}</p>
 </div>
-""".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')), unsafe_allow_html=True)
+""".format(last_fetch_time), unsafe_allow_html=True)
 st.markdown("*TheIndianVisual News Dashboard | Built for instant news monitoring*")
